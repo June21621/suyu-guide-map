@@ -277,7 +277,14 @@ function openRoute(dest){
   });
   closeOriginSearch();
   renderRouteHeader();
+  setSheetTitleForRoute();
   calcRoute();
+}
+
+// 길찾기 화면에서는 시트 머리말도 길찾기로 바꾼다 (카테고리 이름이 남아 있으면 헷갈린다)
+function setSheetTitleForRoute(){
+  document.getElementById("sheetTitle").textContent = `🧭 ${texts().routeTitle}`;
+  document.getElementById("sheetCount").textContent = "";
 }
 
 function closeRoute(){
@@ -287,6 +294,7 @@ function closeRoute(){
   closeOriginSearch();
   document.getElementById("routeView").hidden = true;
   document.getElementById("list").hidden = false;
+  if(activeCategory) runSearch(activeCategory);   // 시트 머리말과 목록을 원래대로 되돌린다
 }
 
 function renderRouteHeader(){
@@ -485,6 +493,7 @@ function applyI18n(){
   refreshChipLabels();
   if(routeDest){
     renderRouteHeader();
+    setSheetTitleForRoute();
     if(lastRoute) renderRouteSummary(lastRoute); else calcRoute();
   }
   if(activeCategory) runSearch(activeCategory); // 결과 리스트 라벨도 새로고침

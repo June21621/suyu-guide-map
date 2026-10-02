@@ -134,6 +134,9 @@
   #setup ol{ padding-left:18px; }
 
 /* ---- 길찾기 ---- */
+/* id 선택자의 display 가 hidden 속성을 덮어쓰지 않게 한다 */
+[hidden]{ display:none !important; }
+
 #centerPin{
   position:absolute; left:50%; top:50%; transform:translate(-50%,-100%);
   font-size:28px; z-index:6; pointer-events:none;
