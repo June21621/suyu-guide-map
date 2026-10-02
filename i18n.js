@@ -35,6 +35,9 @@ const I18N = {
     errNetwork: "길찾기 서버에 연결하지 못했습니다",
     openInKakao: "카카오맵에서 열기",
     durMin: (m)=>`${m}분`, durHour: (h)=>`${h}시간`,
+    modeTransit: "대중교통",
+    legWalk: "도보", fareLabel: "요금",
+    fareWon: (w)=>`${w.toLocaleString()}원`,
   },
   en: {
     appTitle: "Gangbuk-gu Visitor Map",
@@ -67,6 +70,9 @@ const I18N = {
     errNetwork: "Could not reach the directions server",
     openInKakao: "Open in Kakao Map",
     durMin: (m)=>`${m} min`, durHour: (h)=>`${h} h`,
+    modeTransit: "Transit",
+    legWalk: "Walk", fareLabel: "Fare",
+    fareWon: (w)=>`${w.toLocaleString()} KRW`,
   },
   it: {
     appTitle: "Mappa per Visitatori di Gangbuk-gu",
@@ -99,6 +105,9 @@ const I18N = {
     errNetwork: "Impossibile contattare il server delle indicazioni",
     openInKakao: "Apri in Kakao Map",
     durMin: (m)=>`${m} min`, durHour: (h)=>`${h} h`,
+    modeTransit: "Mezzi pubblici",
+    legWalk: "A piedi", fareLabel: "Tariffa",
+    fareWon: (w)=>`${w.toLocaleString()} KRW`,
   },
   es: {
     appTitle: "Mapa para Visitantes de Gangbuk-gu",
@@ -131,6 +140,9 @@ const I18N = {
     errNetwork: "No se pudo conectar con el servidor de rutas",
     openInKakao: "Abrir en Kakao Map",
     durMin: (m)=>`${m} min`, durHour: (h)=>`${h} h`,
+    modeTransit: "Transporte público",
+    legWalk: "A pie", fareLabel: "Tarifa",
+    fareWon: (w)=>`${w.toLocaleString()} KRW`,
   },
   pt: {
     appTitle: "Mapa para Visitantes de Gangbuk-gu",
@@ -163,6 +175,9 @@ const I18N = {
     errNetwork: "Não foi possível conectar ao servidor de rotas",
     openInKakao: "Abrir no Kakao Map",
     durMin: (m)=>`${m} min`, durHour: (h)=>`${h} h`,
+    modeTransit: "Transporte público",
+    legWalk: "A pé", fareLabel: "Tarifa",
+    fareWon: (w)=>`${w.toLocaleString()} KRW`,
   },
 };
 

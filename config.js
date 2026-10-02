@@ -34,3 +34,9 @@ export const ORS_PROFILES = { walk: "foot-walking", car: "driving-car" };
 
 // 도보 경로를 권하지 않는 직선거리 기준 (초과 시 대중교통 안내)
 export const WALK_LIMIT_M = 5000;
+
+/* ---- 대중교통 (TMAP) ----
+   키는 openapi.sk.com 가입 후 발급. ORS 와 마찬가지로 노출되므로
+   테스트 키와 운영 키를 분리한다. */
+export const TMAP_APP_KEY = "";
+export const TMAP_TRANSIT_URL = "https://apis.openapi.sk.com/transit/routes";

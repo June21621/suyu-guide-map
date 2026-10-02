@@ -3,7 +3,7 @@
    ========================================================= */
 import { KAKAO_APP_KEY, CATEGORIES, SEARCH_RADIUS_M, DEFAULT_CENTER, WALK_LIMIT_M } from "./config.js";
 import { getLang, setLang, texts } from "./i18n.js";
-import { fetchRoute, formatDuration, formatDistance, straightDistanceM } from "./routing.js";
+import { fetchRoute, fetchTransitRoute, formatDuration, formatDistance, straightDistanceM, modeIcon } from "./routing.js";
 
 let map, places, geocoder;
 let centerLatLng = null;     // 현재 검색 기준 좌표 (kakao.maps.LatLng)
@@ -16,7 +16,7 @@ let myLatLng = null;         // 마지막으로 확인된 내 위치 (GPS)
 let routeDest = null;        // { lat, lng, name }
 let routeOrigin = null;      // { lat, lng, name, isMyLocation }
 let routeModeId = "walk";
-let routeLine = null;        // kakao.maps.Polyline
+let routeLines = [];         // kakao.maps.Polyline (대중교통은 구간마다 하나씩)
 let routeEndpoints = [];     // 출발/도착 마커
 let lastRoute = null;        // 마지막 성공 결과 (언어 전환 시 재요청 없이 다시 그리기)
 let pickingOrigin = false;
@@ -306,7 +306,8 @@ function renderRouteHeader(){
 }
 
 function clearRouteOverlays(){
-  if(routeLine){ routeLine.setMap(null); routeLine = null; }
+  routeLines.forEach(l=> l.setMap(null));
+  routeLines = [];
   routeEndpoints.forEach(o=>o.setMap(null));
   routeEndpoints = [];
 }
@@ -336,7 +337,9 @@ async function calcRoute(){
   }
 
   routeMsg(t.routing, "info");
-  const res = await fetchRoute(routeModeId, routeOrigin, routeDest);
+  const res = routeModeId === "transit"
+    ? await fetchTransitRoute(routeOrigin, routeDest, getLang())
+    : await fetchRoute(routeModeId, routeOrigin, routeDest);
 
   if(!res.ok){
     const msg = {
@@ -359,24 +362,55 @@ function renderRouteSummary(res){
     <div class="route-summary">
       <span class="dur">${escapeHtml(formatDuration(res.durationS, t))}</span>
       <span class="dist">${escapeHtml(formatDistance(res.distanceM))}</span>
-    </div>`;
+    </div>
+    ${res.legs ? renderLegs(res, t) : ""}`;
+}
+
+/* 대중교통 노선 요약: 🚶 5분 · 🚇 4호선 수유 → 혜화 · 🚶 3분 */
+function renderLegs(res, t){
+  const chips = res.legs.map(leg=>{
+    const mins = Math.max(1, Math.round(leg.sectionTimeS / 60));
+    if(leg.mode === "WALK"){
+      return `<span class="leg">${modeIcon(leg.mode)} ${escapeHtml(t.legWalk)} ${escapeHtml(t.durMin(mins))}</span>`;
+    }
+    const dot = leg.color ? `<span class="line" style="background:${escapeHtml(leg.color)}"></span>` : "";
+    const stops = leg.from && leg.to
+      ? `<span class="stop">${escapeHtml(leg.from)} → ${escapeHtml(leg.to)}</span>` : "";
+    return `<span class="leg">${dot}${modeIcon(leg.mode)} ${escapeHtml(leg.name)} ${stops}</span>`;
+  }).join('<span class="sep">·</span>');
+
+  const fare = res.fare
+    ? `<div class="route-fare">${escapeHtml(t.fareLabel)} ${escapeHtml(t.fareWon(res.fare))}</div>` : "";
+  return `<div class="route-legs">${chips}</div>${fare}`;
 }
 
 function drawRoute(res){
   clearRouteOverlays();
-  const path = res.path.map(p=> new kakao.maps.LatLng(p.lat, p.lng));
-  routeLine = new kakao.maps.Polyline({
-    path, strokeWeight: 5, strokeColor: "#1D3557", strokeOpacity: 0.85, strokeStyle: "solid",
+
+  // 도보·자동차는 구간 하나, 대중교통은 환승 구간마다 색이 다르다.
+  const segments = res.segments
+    || [{ path: res.path, color: "#1D3557", dashed: false }];
+
+  const bounds = new kakao.maps.LatLngBounds();
+  segments.forEach(seg=>{
+    const path = seg.path.map(p=> new kakao.maps.LatLng(p.lat, p.lng));
+    path.forEach(ll=> bounds.extend(ll));
+    const line = new kakao.maps.Polyline({
+      path,
+      strokeWeight: 5,
+      strokeColor: seg.color,
+      strokeOpacity: 0.85,
+      strokeStyle: seg.dashed ? "shortdash" : "solid",
+    });
+    line.setMap(map);
+    routeLines.push(line);
   });
-  routeLine.setMap(map);
 
   routeEndpoints = [
     endpointOverlay(routeOrigin, "#1D3557", "●"),
     endpointOverlay(routeDest, "#E63946", "★"),
   ];
 
-  const bounds = new kakao.maps.LatLngBounds();
-  path.forEach(ll=> bounds.extend(ll));
   map.setBounds(bounds);
 }
 
