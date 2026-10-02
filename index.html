@@ -42,6 +42,11 @@
   <div id="mapwrap">
     <div id="map"></div>
     <div id="locateBtn" title="my location">📍</div>
+    <div id="centerPin" hidden>📍</div>
+    <div id="pickBar" hidden>
+      <button id="pickConfirm" data-i18n="pickHere">여기서 출발</button>
+      <button id="pickCancel" data-i18n="cancel">취소</button>
+    </div>
   </div>
 
   <div id="sheet">
@@ -55,6 +60,37 @@
       </div>
     </div>
     <div id="list"></div>
+
+    <div id="routeView" hidden>
+      <div class="route-head">
+        <button id="routeBack" data-i18n="back">뒤로</button>
+        <div class="route-dest">
+          <span class="lbl" data-i18n="destLabel">도착</span>
+          <span id="routeDestName"></span>
+        </div>
+      </div>
+
+      <div class="route-origin">
+        <span class="lbl" data-i18n="originLabel">출발</span>
+        <span id="originName"></span>
+        <div class="origin-actions">
+          <button id="originPickBtn" data-i18n="originPickOnMap">지도에서 선택</button>
+          <button id="originSearchBtn" data-i18n="originSearch">장소 검색</button>
+        </div>
+      </div>
+
+      <div id="originSearchBox" hidden>
+        <input id="originQuery" type="search" />
+        <div id="originResults"></div>
+      </div>
+
+      <div class="route-modes">
+        <button class="mode active" data-mode="walk"><span>🚶</span><span data-i18n="modeWalk">도보</span></button>
+        <button class="mode" data-mode="car"><span>🚗</span><span data-i18n="modeCar">자동차</span></button>
+      </div>
+
+      <div id="routeResult"></div>
+    </div>
   </div>
 
 </div>

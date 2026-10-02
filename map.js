@@ -1,14 +1,25 @@
 /* =========================================================
    지도 · 검색 · 결과 렌더링
    ========================================================= */
-import { KAKAO_APP_KEY, CATEGORIES, SEARCH_RADIUS_M, DEFAULT_CENTER } from "./config.js";
+import { KAKAO_APP_KEY, CATEGORIES, SEARCH_RADIUS_M, DEFAULT_CENTER, WALK_LIMIT_M } from "./config.js";
 import { getLang, setLang, texts } from "./i18n.js";
+import { fetchRoute, formatDuration, formatDistance, straightDistanceM } from "./routing.js";
 
 let map, places, geocoder;
 let centerLatLng = null;     // 현재 검색 기준 좌표 (kakao.maps.LatLng)
 let markers = [];
 let activeCategory = null;
 let myLocationOverlay = null;
+let myLatLng = null;         // 마지막으로 확인된 내 위치 (GPS)
+
+// 길찾기 상태
+let routeDest = null;        // { lat, lng, name }
+let routeOrigin = null;      // { lat, lng, name, isMyLocation }
+let routeModeId = "walk";
+let routeLine = null;        // kakao.maps.Polyline
+let routeEndpoints = [];     // 출발/도착 마커
+let lastRoute = null;        // 마지막 성공 결과 (언어 전환 시 재요청 없이 다시 그리기)
+let pickingOrigin = false;
 
 /* =========================================================
    3. 부트스트랩
@@ -42,6 +53,7 @@ function initMap(){
       (pos)=>{
         const ll = new kakao.maps.LatLng(pos.coords.latitude, pos.coords.longitude);
         centerLatLng = ll;
+        myLatLng = ll;
         map.setCenter(ll);
         placeMyLocationMarker(ll);
       },
@@ -52,6 +64,7 @@ function initMap(){
 
   document.getElementById("locateBtn").addEventListener("click", locateMe);
   document.getElementById("sheetHandle").addEventListener("click", toggleSheet);
+  bindRouteUI();
 }
 
 function locateMe(){
@@ -59,6 +72,7 @@ function locateMe(){
   navigator.geolocation.getCurrentPosition((pos)=>{
     const ll = new kakao.maps.LatLng(pos.coords.latitude, pos.coords.longitude);
     centerLatLng = ll;
+    myLatLng = ll;
     map.setCenter(ll);
     map.setLevel(4);
     placeMyLocationMarker(ll);
@@ -99,6 +113,7 @@ function refreshChipLabels(){
 }
 
 function selectCategory(cat){
+  if(routeDest) closeRoute();
   activeCategory = cat;
   document.querySelectorAll(".chip").forEach(el=>{
     const isActive = el.dataset.id === cat.id;
@@ -214,12 +229,16 @@ function renderResults(cat, data, status){
         <p class="paddr">${escapeHtml(addr)}</p>
         <div class="actions">
           ${place.phone ? `<a href="tel:${place.phone}">📞 ${t.call}</a>` : ""}
-          <a href="https://map.kakao.com/link/to/${encodeURIComponent(place.place_name)},${place.y},${place.x}" target="_blank" rel="noopener">🧭 ${t.directions}</a>
+          <button type="button" class="route-btn">🧭 ${t.directions}</button>
         </div>
       </div>
       <div class="dist">${fmtDistance(place.distance)}</div>
     `;
     row.addEventListener("click", ()=>{ map.setCenter(pos); map.setLevel(4); });
+    row.querySelector(".route-btn").addEventListener("click", (e)=>{
+      e.stopPropagation();
+      openRoute({ lat:Number(place.y), lng:Number(place.x), name: place.place_name });
+    });
     list.appendChild(row);
   });
 
@@ -237,6 +256,224 @@ function toggleSheet(){
 }
 
 /* =========================================================
+   7. 길찾기
+   - 경로 계산은 OpenRouteService, 표시는 카카오 지도 위 Polyline.
+   ========================================================= */
+function openRoute(dest){
+  routeDest = dest;
+  lastRoute = null;
+  routeModeId = "walk";
+
+  // 출발지 기본값: 마지막으로 확인된 내 위치. 없으면 사용자가 직접 정한다.
+  routeOrigin = myLatLng
+    ? { lat: myLatLng.getLat(), lng: myLatLng.getLng(), isMyLocation: true }
+    : null;
+
+  document.getElementById("list").hidden = true;
+  document.getElementById("routeView").hidden = false;
+  document.getElementById("sheet").classList.add("expanded");
+  document.querySelectorAll(".route-modes .mode").forEach(b=>{
+    b.classList.toggle("active", b.dataset.mode === routeModeId);
+  });
+  closeOriginSearch();
+  renderRouteHeader();
+  calcRoute();
+}
+
+function closeRoute(){
+  clearRouteOverlays();
+  routeDest = null; routeOrigin = null; lastRoute = null;
+  stopPickingOrigin();
+  closeOriginSearch();
+  document.getElementById("routeView").hidden = true;
+  document.getElementById("list").hidden = false;
+}
+
+function renderRouteHeader(){
+  const t = texts();
+  document.getElementById("routeDestName").textContent = routeDest ? routeDest.name : "";
+  const originEl = document.getElementById("originName");
+  if(!routeOrigin) originEl.textContent = "—";
+  else originEl.textContent = routeOrigin.isMyLocation ? t.originMyLocation : routeOrigin.name;
+}
+
+function clearRouteOverlays(){
+  if(routeLine){ routeLine.setMap(null); routeLine = null; }
+  routeEndpoints.forEach(o=>o.setMap(null));
+  routeEndpoints = [];
+}
+
+function routeMsg(text, kind){
+  const t = texts();
+  // 앱 안에서 길을 못 알려주는 상황에서만 카카오맵으로 넘기는 링크를 보여준다.
+  const showFallback = (kind === "error" || kind === "warn") && routeDest;
+  const kakaoLink = showFallback
+    ? `<a href="https://map.kakao.com/link/to/${encodeURIComponent(routeDest.name)},${routeDest.lat},${routeDest.lng}" target="_blank" rel="noopener">🗺️ ${t.openInKakao}</a>`
+    : "";
+  document.getElementById("routeResult").innerHTML =
+    `<div class="route-msg ${kind === "warn" ? "warn" : ""}">${escapeHtml(text)}${kakaoLink}</div>`;
+}
+
+async function calcRoute(){
+  clearRouteOverlays();
+  const t = texts();
+
+  if(!routeDest) return;
+  if(!routeOrigin){ routeMsg(t.needOrigin, "info"); return; }
+
+  // 도보로 권하기 어려운 거리는 요청하지 않고 대중교통을 안내한다. (요청 낭비 방지)
+  if(routeModeId === "walk" && straightDistanceM(routeOrigin, routeDest) > WALK_LIMIT_M){
+    routeMsg(t.walkTooFar, "warn");
+    return;
+  }
+
+  routeMsg(t.routing, "info");
+  const res = await fetchRoute(routeModeId, routeOrigin, routeDest);
+
+  if(!res.ok){
+    const msg = {
+      "no-key": t.errNoKey, "no-route": t.errNoRoute,
+      quota: t.errQuota, network: t.errNetwork, "bad-response": t.errNoRoute,
+    }[res.reason] || t.errNoRoute;
+    lastRoute = null;
+    routeMsg(msg, "error");
+    return;
+  }
+
+  lastRoute = res;
+  drawRoute(res);
+  renderRouteSummary(res);
+}
+
+function renderRouteSummary(res){
+  const t = texts();
+  document.getElementById("routeResult").innerHTML = `
+    <div class="route-summary">
+      <span class="dur">${escapeHtml(formatDuration(res.durationS, t))}</span>
+      <span class="dist">${escapeHtml(formatDistance(res.distanceM))}</span>
+    </div>`;
+}
+
+function drawRoute(res){
+  clearRouteOverlays();
+  const path = res.path.map(p=> new kakao.maps.LatLng(p.lat, p.lng));
+  routeLine = new kakao.maps.Polyline({
+    path, strokeWeight: 5, strokeColor: "#1D3557", strokeOpacity: 0.85, strokeStyle: "solid",
+  });
+  routeLine.setMap(map);
+
+  routeEndpoints = [
+    endpointOverlay(routeOrigin, "#1D3557", "●"),
+    endpointOverlay(routeDest, "#E63946", "★"),
+  ];
+
+  const bounds = new kakao.maps.LatLngBounds();
+  path.forEach(ll=> bounds.extend(ll));
+  map.setBounds(bounds);
+}
+
+function endpointOverlay(point, color, glyph){
+  const el = document.createElement("div");
+  el.className = "pin me";
+  el.style.background = color;
+  el.innerHTML = `<span>${glyph}</span>`;
+  const o = new kakao.maps.CustomOverlay({
+    position: new kakao.maps.LatLng(point.lat, point.lng),
+    content: el, yAnchor: 0.5, zIndex: 9,
+  });
+  o.setMap(map);
+  return o;
+}
+
+/* ---- 출발지 지정: 지도 가운데 핀 ---- */
+function startPickingOrigin(){
+  pickingOrigin = true;
+  document.getElementById("centerPin").hidden = false;
+  document.getElementById("pickBar").hidden = false;
+  document.getElementById("sheet").classList.remove("expanded");
+}
+
+function stopPickingOrigin(){
+  pickingOrigin = false;
+  document.getElementById("centerPin").hidden = true;
+  document.getElementById("pickBar").hidden = true;
+}
+
+function confirmPickedOrigin(){
+  const c = map.getCenter();
+  routeOrigin = { lat: c.getLat(), lng: c.getLng(), name: texts().originPickOnMap, isMyLocation: false };
+  stopPickingOrigin();
+  document.getElementById("sheet").classList.add("expanded");
+  renderRouteHeader();
+  calcRoute();
+}
+
+/* ---- 출발지 지정: 장소 검색 (카카오 SDK 재사용) ---- */
+function toggleOriginSearch(){
+  const box = document.getElementById("originSearchBox");
+  if(box.hidden){
+    box.hidden = false;
+    document.getElementById("originQuery").focus();
+  }else{
+    closeOriginSearch();
+  }
+}
+
+function closeOriginSearch(){
+  const box = document.getElementById("originSearchBox");
+  box.hidden = true;
+  document.getElementById("originQuery").value = "";
+  document.getElementById("originResults").innerHTML = "";
+}
+
+function searchOrigin(query){
+  if(!query.trim()) return;
+  const t = texts();
+  places.keywordSearch(query, (data, status)=>{
+    const box = document.getElementById("originResults");
+    box.innerHTML = "";
+    if(status !== kakao.maps.services.Status.OK || data.length === 0){
+      box.innerHTML = `<div class="hit">${t.searchNoResult}</div>`;
+      return;
+    }
+    data.slice(0, 8).forEach(place=>{
+      const hit = document.createElement("div");
+      hit.className = "hit";
+      hit.innerHTML = `${escapeHtml(place.place_name)}
+        <span class="addr">${escapeHtml(place.road_address_name || place.address_name || "")}</span>`;
+      hit.addEventListener("click", ()=>{
+        routeOrigin = { lat:Number(place.y), lng:Number(place.x), name: place.place_name, isMyLocation:false };
+        closeOriginSearch();
+        renderRouteHeader();
+        calcRoute();
+      });
+      box.appendChild(hit);
+    });
+  }, { location: map.getCenter(), sort: kakao.maps.services.SortBy.DISTANCE });
+}
+
+function bindRouteUI(){
+  document.getElementById("routeBack").addEventListener("click", closeRoute);
+  document.getElementById("originPickBtn").addEventListener("click", startPickingOrigin);
+  document.getElementById("originSearchBtn").addEventListener("click", toggleOriginSearch);
+  document.getElementById("pickConfirm").addEventListener("click", confirmPickedOrigin);
+  document.getElementById("pickCancel").addEventListener("click", ()=>{
+    stopPickingOrigin();
+    document.getElementById("sheet").classList.add("expanded");
+  });
+  document.getElementById("originQuery").addEventListener("keydown", (e)=>{
+    if(e.key === "Enter") searchOrigin(e.target.value);
+  });
+  document.querySelectorAll(".route-modes .mode").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      routeModeId = btn.dataset.mode;
+      document.querySelectorAll(".route-modes .mode").forEach(b=> b.classList.toggle("active", b === btn));
+      calcRoute();
+    });
+  });
+}
+
+/* =========================================================
    6. 다국어 적용
    ========================================================= */
 function applyI18n(){
@@ -246,6 +483,10 @@ function applyI18n(){
     if(texts()[key]) el.textContent = texts()[key];
   });
   refreshChipLabels();
+  if(routeDest){
+    renderRouteHeader();
+    if(lastRoute) renderRouteSummary(lastRoute); else calcRoute();
+  }
   if(activeCategory) runSearch(activeCategory); // 결과 리스트 라벨도 새로고침
 }
 

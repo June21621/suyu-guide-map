@@ -24,3 +24,13 @@ export const CATEGORIES = [
 export const SEARCH_RADIUS_M = 1500;
 // 강북구청 부근 기본 좌표 (GPS 권한이 없을 때 사용)
 export const DEFAULT_CENTER = { lat: 37.6397, lng: 127.0256 };
+
+/* ---- 길찾기 (OpenRouteService) ----
+   키는 openrouteservice.org 가입 후 발급. 도메인 제한이 없어 노출되면
+   한도가 소진될 수 있으므로, 운영 키와 테스트 키를 따로 쓴다. */
+export const ORS_API_KEY = "";
+export const ORS_BASE = "https://api.openrouteservice.org/v2/directions";
+export const ORS_PROFILES = { walk: "foot-walking", car: "driving-car" };
+
+// 도보 경로를 권하지 않는 직선거리 기준 (초과 시 대중교통 안내)
+export const WALK_LIMIT_M = 5000;
