@@ -491,12 +491,13 @@ function applyI18n(){
     if(texts()[key]) el.textContent = texts()[key];
   });
   refreshChipLabels();
+  if(activeCategory) runSearch(activeCategory); // 결과 리스트 라벨도 새로고침
   if(routeDest){
     renderRouteHeader();
+    // runSearch 가 시트 머리말을 카테고리 이름으로 되돌리므로 그 뒤에 다시 쓴다
     setSheetTitleForRoute();
     if(lastRoute) renderRouteSummary(lastRoute); else calcRoute();
   }
-  if(activeCategory) runSearch(activeCategory); // 결과 리스트 라벨도 새로고침
 }
 
 document.querySelectorAll(".langs button").forEach(btn=>{
